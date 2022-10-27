@@ -30,6 +30,43 @@ void relation_attr_init(RelAttr *relation_attr, const char *relation_name, const
     relation_attr->relation_name = nullptr;
   }
   relation_attr->attribute_name = strdup(attribute_name);
+  relation_attr->aggType = AGG_NULL;
+  relation_attr->is_agg = false;
+}
+
+void relation_attr_aggr_init(RelAttr *relation_attr, const char *relation_name,
+    const char *attribute_name, AggType aggrType)
+{
+  if (relation_name != nullptr) {
+    relation_attr->relation_name = strdup(relation_name);
+  } else {
+    relation_attr->relation_name = nullptr;
+  }
+  relation_attr->attribute_name = strdup(attribute_name);
+  relation_attr->is_agg = true;
+  relation_attr->aggType = aggrType;
+}
+
+void group_attr_init(GroupAttr *group_attr, const char *relation_name, const char *attribute_name)
+{
+  if (relation_name != nullptr) {
+    group_attr->relation_name = strdup(relation_name);
+  } else {
+    group_attr->relation_name = nullptr;
+  }
+  group_attr->attribute_name = strdup(attribute_name);
+}
+
+void order_attr_init(OrderAttr *order_attr, const char *relation_name, const char *attribute_name,
+    OrderType orderType)
+{
+  if (relation_name != nullptr) {
+    order_attr->relation_name = strdup(relation_name);
+  } else {
+    order_attr->relation_name = nullptr;
+  }
+  order_attr->attribute_name = strdup(attribute_name);
+  order_attr->type = orderType;
 }
 
 void relation_attr_destroy(RelAttr *relation_attr)
@@ -62,6 +99,18 @@ void value_destroy(Value *value)
   value->type = UNDEFINED;
   free(value->data);
   value->data = nullptr;
+}
+
+int value_init_date(Value *value, const char *v)
+{
+  value->type = DATES;
+  value->data = malloc(sizeof(int));
+
+  int year,month,day;
+  sscanf(v, "%d-%d-%d", &year, &month, &day);
+  int val = year * 10000 + month * 100 + day;
+  memcpy(value->data, &val, sizeof(int));
+  return -1;
 }
 
 void condition_init(Condition *condition, CompOp comp, int left_is_attr, RelAttr *left_attr, Value *left_value,
@@ -108,6 +157,15 @@ void attr_info_destroy(AttrInfo *attr_info)
   attr_info->name = nullptr;
 }
 
+void group_append_attribute(Selects *selects, GroupAttr *group_attr)
+{
+  selects->group_attributes[selects->group_num++] = *group_attr;
+}
+void order_append_attribute(Selects *selects, OrderAttr *order_attr)
+{
+  selects->order_attributes[selects->order_num++] = *order_attr;
+}
+
 void selects_init(Selects *selects, ...);
 void selects_append_attribute(Selects *selects, RelAttr *rel_attr)
 {
@@ -146,25 +204,37 @@ void selects_destroy(Selects *selects)
   selects->condition_num = 0;
 }
 
-void inserts_init(Inserts *inserts, const char *relation_name, Value values[], size_t value_num)
+void inserts_init(Inserts *inserts, const char *relation_name, InsertRecord records[], size_t record_num)
 {
-  assert(value_num <= sizeof(inserts->values) / sizeof(inserts->values[0]));
+  assert(record_num <= sizeof(inserts->records) / sizeof(inserts->records[0]));
 
   inserts->relation_name = strdup(relation_name);
-  for (size_t i = 0; i < value_num; i++) {
-    inserts->values[i] = values[i];
+  for (size_t index = 0; index < record_num; index++) {
+    inserts->records[index] = records[index];
   }
-  inserts->value_num = value_num;
+  inserts->record_num = record_num;
 }
+
+void insert_record_init(InsertRecord *record, Value values[], size_t value_num)
+{
+  record->value_num = value_num;
+
+  for (size_t index = 0; index < value_num; index++) {
+    record->values[index] = values[index];
+  }
+}
+
 void inserts_destroy(Inserts *inserts)
 {
   free(inserts->relation_name);
   inserts->relation_name = nullptr;
 
-  for (size_t i = 0; i < inserts->value_num; i++) {
-    value_destroy(&inserts->values[i]);
+  for (size_t index_1 = 0; index_1 < inserts->record_num; index_1++) {
+    for (size_t index_2 = 0; index_2 < inserts->records[index_1].value_num; index_2++) {
+      value_destroy(&inserts->records[index_1].values[index_1]);
+    }
   }
-  inserts->value_num = 0;
+  inserts->record_num = 0;
 }
 
 void deletes_init_relation(Deletes *deletes, const char *relation_name)
@@ -372,6 +442,7 @@ void query_reset(Query *query)
     case SCF_LOAD_DATA: {
       load_data_destroy(&query->sstr.load_data);
     } break;
+    case SCF_CLOG_SYNC:
     case SCF_BEGIN:
     case SCF_COMMIT:
     case SCF_ROLLBACK:

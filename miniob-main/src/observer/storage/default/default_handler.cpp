@@ -19,15 +19,25 @@ See the Mulan PSL v2 for more details. */
 #include "common/os/path.h"
 #include "common/log/log.h"
 #include "common/lang/string.h"
-#include "storage/common/record_manager.h"
-#include "storage/common/bplus_tree.h"
+#include "storage/record/record_manager.h"
+#include "storage/index/bplus_tree.h"
 #include "storage/common/table.h"
 #include "storage/common/condition_filter.h"
 
+static DefaultHandler *default_handler = nullptr;
+
+void DefaultHandler::set_default(DefaultHandler *handler)
+{
+  if (default_handler != nullptr && handler != nullptr) {
+    LOG_ERROR("default handler is setted");
+    abort();
+  }
+  default_handler = handler;
+}
+
 DefaultHandler &DefaultHandler::get_default()
 {
-  static DefaultHandler handler;
-  return handler;
+  return *default_handler;
 }
 
 DefaultHandler::DefaultHandler()
@@ -113,6 +123,10 @@ RC DefaultHandler::open_db(const char *dbname)
   if ((ret = db->init(dbname, dbpath.c_str())) != RC::SUCCESS) {
     LOG_ERROR("Failed to open db: %s. error=%d", dbname, ret);
   }
+  if ((ret = db->recover()) != RC::SUCCESS) {
+    LOG_ERROR("Failed to recover db: %s. error=%d", dbname, ret);
+  }
+
   opened_dbs_[dbname] = db;
   return RC::SUCCESS;
 }
@@ -139,7 +153,12 @@ RC DefaultHandler::create_table(
 
 RC DefaultHandler::drop_table(const char *dbname, const char *relation_name)
 {
-  return RC::GENERIC_ERROR;
+  // 查找数据库
+  Db *db = find_db(dbname);  
+  if(db == nullptr) {
+    return RC::SCHEMA_DB_NOT_OPENED;
+  }
+  return db->drop_table(relation_name); // 直接调用db的删掉接口
 }
 
 RC DefaultHandler::create_index(
@@ -166,7 +185,8 @@ RC DefaultHandler::insert_record(
     return RC::SCHEMA_TABLE_NOT_EXIST;
   }
 
-  return table->insert_record(trx, value_num, values);
+  Record re;
+  return table->insert_record(trx, value_num, values, re);
 }
 RC DefaultHandler::delete_record(Trx *trx, const char *dbname, const char *relation_name, int condition_num,
     const Condition *conditions, int *deleted_count)
@@ -192,7 +212,8 @@ RC DefaultHandler::update_record(Trx *trx, const char *dbname, const char *relat
     return RC::SCHEMA_TABLE_NOT_EXIST;
   }
 
-  return table->update_record(trx, attribute_name, value, condition_num, conditions, updated_count);
+  const Value v1 = *value;
+  return table->update_record(trx, attribute_name, v1, condition_num, conditions, updated_count);
 }
 
 Db *DefaultHandler::find_db(const char *dbname) const

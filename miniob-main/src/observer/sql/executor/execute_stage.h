@@ -17,9 +17,12 @@ See the Mulan PSL v2 for more details. */
 
 #include "common/seda/stage.h"
 #include "sql/parser/parse.h"
+#include "sql/stmt/update_stmt.h"
 #include "rc.h"
 
+class SQLStageEvent;
 class SessionEvent;
+class SelectStmt;
 
 class ExecuteStage : public common::Stage {
 public:
@@ -37,7 +40,18 @@ protected:
   void callback_event(common::StageEvent *event, common::CallbackContext *context) override;
 
   void handle_request(common::StageEvent *event);
-  RC do_select(const char *db, Query *sql, SessionEvent *session_event);
+  RC do_update(UpdateStmt *stmt,SessionEvent *session_event);
+  RC do_help(SQLStageEvent *session_event);
+  RC do_create_table(SQLStageEvent *sql_event);
+  RC do_create_index(SQLStageEvent *sql_event);
+  RC do_show_tables(SQLStageEvent *sql_event);
+  RC do_desc_table(SQLStageEvent *sql_event);
+  RC do_select(SQLStageEvent *sql_event);
+  RC do_insert(SQLStageEvent *sql_event);
+  RC do_delete(SQLStageEvent *sql_event);
+  RC do_begin(SQLStageEvent *sql_event);
+  RC do_commit(SQLStageEvent *sql_event);
+  RC do_clog_sync(SQLStageEvent *sql_event);
 
 protected:
 private:

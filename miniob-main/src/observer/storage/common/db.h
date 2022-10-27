@@ -23,6 +23,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/parser/parse_defs.h"
 
 class Table;
+class CLogManager;
 
 class Db {
 public:
@@ -32,6 +33,7 @@ public:
   RC init(const char *name, const char *dbpath);
 
   RC create_table(const char *table_name, int attribute_count, const AttrInfo *attributes);
+  RC drop_table(const char* table_name);
 
   Table *find_table(const char *table_name) const;
 
@@ -41,6 +43,10 @@ public:
 
   RC sync();
 
+  RC recover();
+
+  CLogManager *get_clog_manager();
+
 private:
   RC open_all_tables();
 
@@ -48,6 +54,7 @@ private:
   std::string name_;
   std::string path_;
   std::unordered_map<std::string, Table *> opened_tables_;
+  CLogManager *clog_manager_ = nullptr;
 };
 
 #endif  // __OBSERVER_STORAGE_COMMON_DB_H__

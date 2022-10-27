@@ -23,11 +23,34 @@ See the Mulan PSL v2 for more details. */
 #define MAX_ERROR_MESSAGE 20
 #define MAX_DATA 50
 
+typedef enum {
+  AGG_MAX,
+  AGG_MIN,
+  AGG_COUNT,
+  AGG_AVG,
+  AGG_NULL
+} AggType;
+
 //属性结构体
 typedef struct {
   char *relation_name;   // relation name (may be NULL) 表名
   char *attribute_name;  // attribute name              属性名
+  int is_agg;
+  AggType aggType;
 } RelAttr;
+
+typedef struct {
+  char *relation_name;   // relation name (may be NULL) 表名
+  char *attribute_name;  // attribute name              属性名
+} GroupAttr;
+
+typedef enum { OrderAsc, OrderDesc } OrderType;
+
+typedef struct {
+  char *relation_name;   // relation name (may be NULL) 表名
+  char *attribute_name;  // attribute name              属性名
+  OrderType type;
+} OrderAttr;
 
 typedef enum {
   EQUAL_TO,     //"="     0
@@ -40,7 +63,14 @@ typedef enum {
 } CompOp;
 
 //属性值类型
-typedef enum { UNDEFINED, CHARS, INTS, FLOATS } AttrType;
+typedef enum
+{
+  UNDEFINED,
+  CHARS,
+  INTS,
+  FLOATS,
+  DATES
+} AttrType;
 
 //属性值
 typedef struct _Value {
@@ -68,13 +98,24 @@ typedef struct {
   char *relations[MAX_NUM];       // relations in From clause
   size_t condition_num;           // Length of conditions in Where clause
   Condition conditions[MAX_NUM];  // conditions in Where clause
+  size_t order_num;
+  OrderAttr order_attributes[MAX_NUM];
+  size_t group_num;
+  GroupAttr group_attributes[MAX_NUM];    // attrs in Select clause
+
 } Selects;
+
+typedef struct {
+  size_t value_num;       // Length of values
+  Value values[MAX_NUM];  // values to insert
+} InsertRecord;
+
 
 // struct of insert
 typedef struct {
   char *relation_name;    // Relation to insert into
-  size_t value_num;       // Length of values
-  Value values[MAX_NUM];  // values to insert
+  InsertRecord records[MAX_NUM];
+  size_t record_num;
 } Inserts;
 
 // struct of delete
@@ -162,6 +203,7 @@ enum SqlCommandFlag {
   SCF_DESC_TABLE,
   SCF_BEGIN,
   SCF_COMMIT,
+  SCF_CLOG_SYNC,
   SCF_ROLLBACK,
   SCF_LOAD_DATA,
   SCF_HELP,
@@ -184,6 +226,7 @@ void value_init_integer(Value *value, int v);
 void value_init_float(Value *value, float v);
 void value_init_string(Value *value, const char *v);
 void value_destroy(Value *value);
+int value_init_date(Value *value, const char *v);
 
 void condition_init(Condition *condition, CompOp comp, int left_is_attr, RelAttr *left_attr, Value *left_value,
     int right_is_attr, RelAttr *right_attr, Value *right_value);
@@ -192,13 +235,16 @@ void condition_destroy(Condition *condition);
 void attr_info_init(AttrInfo *attr_info, const char *name, AttrType type, size_t length);
 void attr_info_destroy(AttrInfo *attr_info);
 
+void group_append_attribute(Selects *selects, GroupAttr *group_attr);
+
 void selects_init(Selects *selects, ...);
 void selects_append_attribute(Selects *selects, RelAttr *rel_attr);
 void selects_append_relation(Selects *selects, const char *relation_name);
 void selects_append_conditions(Selects *selects, Condition conditions[], size_t condition_num);
 void selects_destroy(Selects *selects);
 
-void inserts_init(Inserts *inserts, const char *relation_name, Value values[], size_t value_num);
+void inserts_init(Inserts *inserts, const char *relation_name, InsertRecord records[], size_t record_num);
+void insert_record_init(InsertRecord *records, Value values[], size_t value_num);
 void inserts_destroy(Inserts *inserts);
 
 void deletes_init_relation(Deletes *deletes, const char *relation_name);

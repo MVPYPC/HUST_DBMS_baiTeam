@@ -55,6 +55,13 @@ SET(CMAKE_CXX_FLAGS ${CMAKE_COMMON_FLAGS})
 SET(CMAKE_C_FLAGS ${CMAKE_COMMON_FLAGS})
 MESSAGE("CMAKE_CXX_FLAGS is " ${CMAKE_CXX_FLAGS})
 
+OPTION(ENABLE_ASAN OFF "Enable build with address sanitizer")
+
+IF (ENABLE_ASAN)
+    SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fno-omit-frame-pointer -fsanitize=address")
+    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-omit-frame-pointer -fsanitize=address")
+    SET(CMAKE_LINKER_FLAGS_DEBUG  "${CMAKE_LINKER_FLAGS_DEBUG} -fno-omit-frame-pointer -fsanitize=address")
+ENDIF()
 
 IF (CMAKE_INSTALL_PREFIX)
     MESSAGE("CMAKE_INSTALL_PREFIX has been set as " ${CMAKE_INSTALL_PREFIX} )
@@ -69,9 +76,13 @@ MESSAGE("Install target dir is " ${CMAKE_INSTALL_PREFIX})
 # ADD_SUBDIRECTORY(src bin)  bin 为目标目录， 可以省略
 ADD_SUBDIRECTORY(deps)
 ADD_SUBDIRECTORY(src)
-ADD_SUBDIRECTORY(unitest)
 ADD_SUBDIRECTORY(test/perf)
 
+OPTION(WITH_UNIT_TESTS "Compile miniob with unit tests" ON)
+
+IF(WITH_UNIT_TESTS)
+    ADD_SUBDIRECTORY(unitest)
+ENDIF()
 
 # install 准备安装的目录是cmakefile 的当前目录， 不是build 后生成的目录
 # Files 默认权限OWNER_WRITE, OWNER_READ, GROUP_READ,和WORLD_READ，即644权限

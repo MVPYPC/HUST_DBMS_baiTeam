@@ -16,12 +16,13 @@ See the Mulan PSL v2 for more details. */
 
 #include "storage/trx/trx.h"
 #include "storage/common/table.h"
-#include "storage/common/record_manager.h"
+#include "storage/record/record_manager.h"
 #include "storage/common/field_meta.h"
 #include "common/log/log.h"
 
 static const uint32_t DELETED_FLAG_BIT_MASK = 0x80000000;
 static const uint32_t TRX_ID_BIT_MASK = 0x7FFFFFFF;
+std::atomic<int32_t> Trx::trx_id(0);
 
 int32_t Trx::default_trx_id()
 {
@@ -30,8 +31,23 @@ int32_t Trx::default_trx_id()
 
 int32_t Trx::next_trx_id()
 {
-  static std::atomic<int32_t> trx_id;
   return ++trx_id;
+}
+
+void Trx::set_trx_id(int32_t id)
+{
+  trx_id = id;
+}
+
+void Trx::next_current_id()
+{
+  Trx::next_trx_id();
+  trx_id_ = trx_id;
+}
+
+int32_t Trx::get_current_id()
+{
+  return trx_id_;
 }
 
 const char *Trx::trx_field_name()
@@ -50,26 +66,48 @@ int Trx::trx_field_len()
 }
 
 Trx::Trx()
-{}
+{
+  // start_if_not_started();
+}
 
 Trx::~Trx()
-{}
+{
+  start_if_not_started();
+}
 
 RC Trx::insert_record(Table *table, Record *record)
 {
   RC rc = RC::SUCCESS;
   // 先校验是否以前是否存在过(应该不会存在)
-  Operation *old_oper = find_operation(table, record->rid);
+  Operation *old_oper = find_operation(table, record->rid());
+  if (old_oper != nullptr) {
+    if (old_oper->type() == Operation::Type::DELETE) {
+      delete_operation(table, record->rid());
+    } else {
+      return RC::GENERIC_ERROR;
+    }
+  }
+
+  // start_if_not_started();
+  // 记录到operations中
+  insert_operation(table, Operation::Type::INSERT, record->rid());
+  return rc;
+}
+
+RC Trx::update_record(Table *table, Record *record)
+{
+  RC rc = RC::SUCCESS;
+  // 先校验是否以前是否存在过(应该不会存在)
+  Operation *old_oper = find_operation(table, record->rid());
   if (old_oper != nullptr) {
     return RC::GENERIC_ERROR;  // error code
   }
-
   start_if_not_started();
 
-  // 设置record中trx_field为当前的事务号
-  // set_record_trx_id(table, record, trx_id_, false);
-  // 记录到operations中
-  insert_operation(table, Operation::Type::INSERT, record->rid);
+  /*设置record中trx_field为当前的事务号
+    set_record_trx_id(table, record, trx_id_, false);
+    记录到operations中*/
+  update_operation(table, Operation::Type::UPDATE, record->rid());
   return rc;
 }
 
@@ -77,24 +115,24 @@ RC Trx::delete_record(Table *table, Record *record)
 {
   RC rc = RC::SUCCESS;
   start_if_not_started();
-  Operation *old_oper = find_operation(table, record->rid);
+  Operation *old_oper = find_operation(table, record->rid());
   if (old_oper != nullptr) {
-    if (old_oper->type() == Operation::Type::INSERT) {
-      delete_operation(table, record->rid);
+    if (old_oper->type() == Operation::Type::INSERT || old_oper->type() == Operation::Type::UPDATE) {
+      delete_operation(table, record->rid());
       return RC::SUCCESS;
     } else {
       return RC::GENERIC_ERROR;
     }
   }
   set_record_trx_id(table, *record, trx_id_, true);
-  insert_operation(table, Operation::Type::DELETE, record->rid);
+  insert_operation(table, Operation::Type::DELETE, record->rid());
   return rc;
 }
 
 void Trx::set_record_trx_id(Table *table, Record &record, int32_t trx_id, bool deleted) const
 {
   const FieldMeta *trx_field = table->table_meta().trx_field();
-  int32_t *ptrx_id = (int32_t *)(record.data + trx_field->offset());
+  int32_t *ptrx_id = (int32_t *)(record.data() + trx_field->offset());
   if (deleted) {
     trx_id |= DELETED_FLAG_BIT_MASK;
   }
@@ -104,7 +142,7 @@ void Trx::set_record_trx_id(Table *table, Record &record, int32_t trx_id, bool d
 void Trx::get_record_trx_id(Table *table, const Record &record, int32_t &trx_id, bool &deleted)
 {
   const FieldMeta *trx_field = table->table_meta().trx_field();
-  int32_t trx = *(int32_t *)(record.data + trx_field->offset());
+  int32_t trx = *(int32_t *)(record.data() + trx_field->offset());
   trx_id = trx & TRX_ID_BIT_MASK;
   deleted = (trx & DELETED_FLAG_BIT_MASK) != 0;
 }
@@ -123,6 +161,12 @@ Operation *Trx::find_operation(Table *table, const RID &rid)
     return nullptr;
   }
   return const_cast<Operation *>(&(*operation_iter));
+}
+
+void Trx::update_operation(Table *table, Operation::Type type, const RID &rid)
+{
+  OperationSet &table_operations = operations_[table];
+  table_operations.emplace(type, rid);
 }
 
 void Trx::insert_operation(Table *table, Operation::Type type, const RID &rid)
@@ -164,6 +208,14 @@ RC Trx::commit()
                 "Failed to commit insert operation. rid=%d.%d, rc=%d:%s", rid.page_num, rid.slot_num, rc, strrc(rc));
           }
         } break;
+        case Operation::Type::UPDATE: {
+          rc = table->commit_update(this, rid);
+          if (rc != RC::SUCCESS) {
+            // handle rc
+            LOG_ERROR(
+                "Failed to commit update operation. rid=%d.%d, rc=%d:%s", rid.page_num, rid.slot_num, rc, strrc(rc));
+          }
+        } break ;
         case Operation::Type::DELETE: {
           rc = table->commit_delete(this, rid);
           if (rc != RC::SUCCESS) {
@@ -205,6 +257,14 @@ RC Trx::rollback()
                 "Failed to rollback insert operation. rid=%d.%d, rc=%d:%s", rid.page_num, rid.slot_num, rc, strrc(rc));
           }
         } break;
+        case Operation::Type::UPDATE: {
+          rc = table->rollback_update(this, rid);
+          if (rc != RC::SUCCESS) {
+            // handle rc
+            LOG_ERROR(
+                "Failed to rollback update operation. rid=%d.%d, rc=%d:%s", rid.page_num, rid.slot_num, rc, strrc(rc));
+          }
+        } break ;
         case Operation::Type::DELETE: {
           rc = table->rollback_delete(this, rid);
           if (rc != RC::SUCCESS) {
@@ -226,6 +286,12 @@ RC Trx::rollback()
 }
 
 RC Trx::commit_insert(Table *table, Record &record)
+{
+  set_record_trx_id(table, record, 0, false);
+  return RC::SUCCESS;
+}
+
+RC Trx::commit_update(Table *table, Record &record)
 {
   set_record_trx_id(table, record, 0, false);
   return RC::SUCCESS;

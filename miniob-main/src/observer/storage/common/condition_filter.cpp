@@ -13,8 +13,9 @@ See the Mulan PSL v2 for more details. */
 //
 
 #include <stddef.h>
+#include <math.h>
 #include "condition_filter.h"
-#include "record_manager.h"
+#include "storage/record/record_manager.h"
 #include "common/log/log.h"
 #include "storage/common/table.h"
 
@@ -40,7 +41,7 @@ DefaultConditionFilter::~DefaultConditionFilter()
 
 RC DefaultConditionFilter::init(const ConDesc &left, const ConDesc &right, AttrType attr_type, CompOp comp_op)
 {
-  if (attr_type < CHARS || attr_type > FLOATS) {
+  if (attr_type < CHARS || attr_type > DATES) {
     LOG_ERROR("Invalid condition with unsupported attribute type: %d", attr_type);
     return RC::INVALID_ARGUMENT;
   }
@@ -129,13 +130,13 @@ bool DefaultConditionFilter::filter(const Record &rec) const
   char *right_value = nullptr;
 
   if (left_.is_attr) {  // value
-    left_value = (char *)(rec.data + left_.attr_offset);
+    left_value = (char *)(rec.data() + left_.attr_offset);
   } else {
     left_value = (char *)left_.value;
   }
 
   if (right_.is_attr) {
-    right_value = (char *)(rec.data + right_.attr_offset);
+    right_value = (char *)(rec.data() + right_.attr_offset);
   } else {
     right_value = (char *)right_.value;
   }
@@ -156,7 +157,11 @@ bool DefaultConditionFilter::filter(const Record &rec) const
     case FLOATS: {
       float left = *(float *)left_value;
       float right = *(float *)right_value;
-      cmp_result = (int)(left - right);
+      float result = left - right;
+      cmp_result = result >= 0 ? ceil(result) : floor(result);
+    } break;
+    case DATES: {
+      cmp_result = (int)(*(int *)left_value) - (int)(*(int *)right_value);
     } break;
     default: {
     }
